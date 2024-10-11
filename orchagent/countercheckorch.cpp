@@ -40,12 +40,77 @@ CounterCheckOrch::~CounterCheckOrch(void)
     SWSS_LOG_ENTER();
 }
 
+void CounterCheckOrch::calculatePfcStats()
+{
+    for (auto& i : m_pfcFrameCountersMap)
+    {
+        // Get the current value of the counters
+        auto oid = i.first;
+        auto counters = i.second;
+
+        // Fetch the new value of the counter
+	auto newCounters = getPfcFrameCounters(oid);
+
+	uint64_t delta_stat;
+	for (size_t prio = 0; prio < counters.size(); prio++){
+		// Calculate the delta of the pfc counter values
+		delta_stat = newCounters[prio] - counters[prio];
+
+		// Calculate Rx Pause transitions
+		if (!m_prevRxPauseTransition.empty() && m_prevRxPauseTransition[oid][prio] == PFC_ACTIVE && delta_stat == 0)
+		{
+			// There was transition from pfc pause ON to PFC Pause OFF
+			m_totalRxPauseTransitions[oid][prio] += 1;
+		}
+
+		// Update m_prevRxPauseTransition
+		m_prevRxPauseTransition[oid][prio] = delta_stat == 0 ? PFC_INACTIVE : PFC_ACTIVE;
+
+		// Calculate Max Rx Pause Time and Max Rx Pause Timestamp
+		if (delta_stat > 0)
+		{
+			m_currentRxPauseTime[oid][prio] += delta_stat;
+			if (m_currentRxPauseTime[oid][prio] > m_maxRxPauseTime[oid][prio])
+			{
+				m_maxRxPauseTime[oid][prio] = m_currentRxPauseTime[oid][prio];
+				m_maxRxPauseTimestamp[oid][prio] = 0; //TODO: Get current timestamp using chrono
+			}
+		}
+		else{
+			m_currentRxPauseTime[oid][prio] = 0;
+		}
+
+		// Calculate Total Rx Pause Time
+		m_totalRxPauseTime[oid][prio] += delta_stat;
+
+		// Populate the COUNTERS_DB with the generated stats
+		std::string db_key = "COUNTERS:" + sai_serialize_object_id(oid);
+		std::string totalRxPauseTime = "SAI_PORT_STAT_PFC_" + std::to_string(prio) + "_TOTAL_RX_PAUSE_TIME";
+		std::string value = m_totalRxPauseTime[oid][prio];
+		m_countersDb->hset(COUNTERS_TABLE, db_key, totalRxPauseTime, value);
+
+		std::string rxPauseTrans = "SAI_PORT_STAT_PFC_" + std::to_string(prio) + "_RX_PAUSE_TRANS";
+		value = m_totalRxPauseTransitions[oid][prio];
+		m_countersDb->hset(COUNTERS_TABLE, db_key, rxPauseTrans, value);
+
+		std::string maxRxPauseTime = "SAI_PORT_STAT_PFC_" + std::to_string(prio) + "_MAX_RX_PAUSE_TIME";
+		value = m_maxRxPauseTime[oid][prio];
+		m_countersDb->hset(COUNTERS_TABLE, db_key, maxRxPauseTime, value);
+
+		std::string maxRxPauseTimestamp = "SAI_PORT_STAT_PFC_" + std::to_string(prio) + "_MAX_RX_PAUSE_TMSP";
+		value = m_maxRxPauseTimestamp[oid][prio];
+		m_countersDb->hset(COUNTERS_TABLE, db_key, maxRxPauseTimestamp, value);
+	}
+    }
+}
+
 void CounterCheckOrch::doTask(SelectableTimer &timer)
 {
     SWSS_LOG_ENTER();
 
     mcCounterCheck();
     pfcFrameCounterCheck();
+    calculatePfcStats();
 }
 
 void CounterCheckOrch::mcCounterCheck()

@@ -4,9 +4,12 @@
 #include "orch.h"
 #include "port.h"
 #include "timer.h"
+#include <queue>
 #include <array>
 
 #define PFC_WD_TC_MAX 8
+#define PFC_ACTIVE 1
+#define PFC_INACTIVE 0
 
 extern "C" {
 #include "sai.h"
@@ -23,6 +26,15 @@ public:
     virtual void doTask(Consumer &consumer) {}
     void addPort(const swss::Port& port);
     void removePort(const swss::Port& port);
+    void calculatePfcStats();
+
+    // Member variables to capture additional Pfc stats
+    std::map<sai_object_id_t, std::map<size_t, uint64_t>> m_prevRxPauseTransition;
+    std::map<sai_object_id_t, std::map<size_t, uint64_t>> m_totalRxPauseTransitions;
+    std::map<sai_object_id_t, std::map<size_t, uint64_t>> m_maxRxPauseTime;
+    std::map<sai_object_id_t, std::map<size_t, uint64_t>> m_maxRxPauseTimestamp; //TODO: Figure out a timestamp datatype
+    std::map<sai_object_id_t, std::map<size_t, uint64_t>> m_currentRxPauseTime;
+    std::map<sai_object_id_t, std::map<size_t, uint64_t>> m_totalRxPauseTime;
 
 private:
     CounterCheckOrch(swss::DBConnector *db, std::vector<std::string> &tableNames);
